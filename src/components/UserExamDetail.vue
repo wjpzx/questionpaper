@@ -1,6 +1,6 @@
 <template>
   <div>
-    <div v-if="!needLogin">
+    <div id="detail" style="display: none;">
       <el-row style="height: 20px">
         <el-col :span="24" style="background-color: #303133">
           <div style="color: #F2F6FC; font-size: 1.5em;margin-top: 5px;">
@@ -12,7 +12,6 @@
       <el-row style="height: 10px">
         <el-col :span="24" style="">
           <div style="color: darkred; font-size: 0.5em;float: left;margin-left: 10px">
-            <!--            ⚠️注意：（1）到达截止时间后，试卷将不可提交，请及时保存；（2）提交试卷后，试卷将不可修改，请谨慎提交。-->
             ⚠️注意：（1）到达截止时间后，试卷将自动提交，请及时保存。
           </div>
         </el-col>
@@ -22,7 +21,8 @@
         <el-col :span="24" style="">
           <div style="color: black; font-size: 1.5em;float: left; margin-left: 10px">
             <!--          距离结束:{{ countDown.day }}天{{ countDown.hr }}:{{ countDown.min }}:{{ countDown.sec }}-->
-            距离结束: {{ countDown.min }}:{{ countDown.sec }}
+            <span v-if="canAnswer">距离结束: {{ countDown.min }}:{{ countDown.sec }}</span>
+            <span v-else>答题时间已结束</span>
           </div>
         </el-col>
       </el-row>
@@ -76,23 +76,23 @@
         </template>
       </template>
       <el-divider/>
-      <el-button size="mini" type="primary" @click="save('save')">保存</el-button>
-      <el-button size="mini" type="primary" @click="save_submit()">提交试卷</el-button>
+      <el-button size="mini" type="primary" :disabled=!canAnswer @click="save('save')">保存</el-button>
+      <el-button size="mini" type="primary" :disabled=!canAnswer @click="save_submit()">提交试卷</el-button>
     </div>
-    <div v-if="needLogin">
-      <el-row class="login">
-        <div class="data-input">
-          <p>姓&nbsp;&nbsp;&nbsp;&nbsp;名：
-            <el-input style="width: 300px" type="text" v-model="name" placeholder="请输入姓名" clearable/>
-          </p>
-          <p>手机号：
-            <el-input style="width: 300px" type="phone" v-model="phone" placeholder="请输入手机号" clearable/>
-          </p>
-          <p>
-            <el-button type="primary">提交</el-button>
-          </p>
-        </div>
-      </el-row>
+    <div class="login" id="login">
+      <el-form :model="userModel" :rules="rules" size="medium" label-width="80px" :label-position=labelPosition
+               class="form" ref="userModel">
+        <el-form-item label="姓名" class="form-label" prop="name">
+          <el-input style="width: 300px;" v-model="userModel.name" placeholder="请输入姓名" clearable/>
+        </el-form-item>
+        <el-form-item label="手机号" class="form-label" prop="phone">
+          <el-input style="width: 300px" v-model="userModel.phone" placeholder="请输入手机号" clearable/>
+        </el-form-item>
+        <el-form-item>
+          <el-button type="primary" class="form-button" @click="InfoSubmit('userModel')">提交</el-button>
+        </el-form-item>
+      </el-form>
+
     </div>
   </div>
 </template>
@@ -105,12 +105,33 @@ import Utils from '../utils'
 export default {
   name: 'UserExamDetail',
   data() {
+    const validatePhone = (rule, value, callback) => {
+      const reg = /^1[3-9][0-9]{9}$/
+      if (reg.test(value)) {
+        callback()
+      } else {
+        rule.message = "手机号格式错误"
+        callback(new Error("手机号格式错误"))
+      }
+    }
     return {
       id: this.$route.params.eid,
-      type: this.$route.query.type,
+      labelPosition: "left",
+      startTime: "",
       title: '',
-      name: "",
-      phone: "",
+      userModel: {
+        "id": this.$route.params.eid,
+        "name": "",
+        "phone": "",
+      },
+      rules: {
+        name: [
+          {required: true, message: "姓名为必填", trigger: "blur"}
+        ],
+        phone: [
+          {validator: validatePhone, required: true, message: "手机号为必填", trigger: "blur", len: 11},
+        ]
+      },
       needLogin: true,
       canAnswer: true,
       questionList: {
@@ -133,24 +154,66 @@ export default {
       } else if (path === "paper") {
         this.needLogin = false;
         this.canAnswer = false;
+        this.userModel.name = this.$route.query.name
+        this.userModel.phone = this.$route.query.phone
+        $('#login').css("display", "none");
+        $('#detail').css("display", "block");
+        this.detail("paper");
       }
     },
-    detail() {
+    InfoSubmit(formName) {
+      this.$refs[formName].validate((valid) => {
+        if (valid) {
+          const self = this
+          $.ajax({
+            url: Conf.url.v1.paper.user().path,
+            type: Conf.url.v1.paper.user().method,
+            data: {"info": JSON.stringify(self.userModel)},
+            dataType: "json",
+            success: function (data) {
+              if (Utils.apiStatusDeal(self, data)) {
+                console.log("data===:", data)
+                self.startTime = data.start_time;
+                self.detail("exam");
+                $('#login').css("display", "none");
+                $('#detail').css("display", "block");
+              }
+            },
+            error: function (error) {
+              console.log("ajax error", error)
+              alert("请求失败，请刷新后重试")
+            }
+          })
+        } else {
+          console.log('error submit!!')
+          alert("请将信息填充完整！")
+        }
+      })
+    },
+    detail(method) {
       const self = this
       $.ajax({
         url: Conf.url.v1.paper.detail(this.id).path,
         type: Conf.url.v1.paper.detail(this.id).method,
+        data: {"name": self.userModel.name, "phone": self.userModel.phone},
         dataType: 'json',
         xhrFields: {
           withCredentials: true
         },
         success: function (data) {
           if (Utils.apiStatusDeal(self, data)) {
-            // console.log("data is :", data)
+            console.log("data is :", data)
             self.questionList = data.question_list
             self.title = data.title
-            // self.countdown(data.end_time)
-            self.setTime()
+            const paper_status = data.paper_status
+            if (paper_status === "normal" && method === "exam") {
+              self.canAnswer = true;
+            } else if (paper_status === "over") {
+              self.canAnswer = false;
+            }
+            if (method === "exam") {
+              self.countdown(self.startTime)
+            }
           }
         },
         error: function (xhr, errorType, error) {
@@ -162,9 +225,10 @@ export default {
     save(operation) {
       const self = this
       $.ajax({
-        url: Conf.url.v1.paper.save(this.id).path,
-        type: Conf.url.v1.paper.save(this.id).method,
+        url: Conf.url.v1.paper.save().path,
+        type: Conf.url.v1.paper.save().method,
         data: JSON.stringify({
+          user_info: this.userModel,
           new_answer_info: this.questionList,
           operation: operation,
         }),
@@ -175,8 +239,13 @@ export default {
         },
         success: function (data) {
           if (Utils.apiStatusDeal(self, data)) {
-            self.$message('保存成功')
-            self.detail()
+            if (operation === "save") {
+              self.$message('保存成功')
+            } else {
+              self.canAnswer = false
+
+              self.detail("exam")
+            }
           }
         },
         error: function (xhr, errorType, error) {
@@ -199,45 +268,43 @@ export default {
         })
       })
     },
-    // countdown(endTime) {
-    //   const end = Date.parse(new Date(endTime))
-    //   const now = Date.parse(new Date())
-    //   const msec = end - now
-    //   let day = 0
-    //   let hr = 0
-    //   let min = 0
-    //   let sec = 0
-    //   if (msec > 0) {
-    //     day = parseInt(msec / 1000 / 60 / 60 / 24)
-    //     hr = parseInt(msec / 1000 / 60 / 60 % 24)
-    //     min = parseInt(msec / 1000 / 60 % 60)
-    //     sec = parseInt(msec / 1000 % 60)
-    //   } else {
-    //     this.save('submit')
-    //     this.canAnswer = false
-    //     this.$alert('考试已结束', '考试通知', {
-    //       confirmButtonText: '确定'
-    //     })
-    //   }
-    //   this.countDown.day = day
-    //   this.countDown.hr = hr > 9 ? hr : '0' + hr
-    //   this.countDown.min = min > 9 ? min : '0' + min
-    //   this.countDown.sec = sec > 9 ? sec : '0' + sec
-    //   if (this.canAnswer === false) {
-    //     return
-    //   }
-    //   const that = this
-    //   clearTimeout(this._interval)
-    //   this._interval = setTimeout(function () {
-    //     that.countdown(endTime)
-    //   }, 1000)
-    // },
+    countdown(startTime) {
+      const start = Date.parse(new Date(startTime))
+      const now = Date.parse(new Date())
+      let min = 0
+      let sec = 0
+      const time = now - start
+      if (time < 45 * 60000) {
+        const msec = 45 * 60000 - time - 1000   // 设置1000ms容错率
+        if (msec > 0) {
+          min = parseInt(msec / 1000 / 60 % 60)
+          sec = parseInt(msec / 1000 % 60)
+        }
+      } else {
+        if (this.canAnswer) {
+          this.save('submit')
+          this.canAnswer = false
+          this.$alert('答题已结束', '通知', {
+            confirmButtonText: '确定'
+          })
+        }
+      }
+      this.countDown.min = min > 9 ? min : '0' + min
+      this.countDown.sec = sec > 9 ? sec : '0' + sec
+      if (this.canAnswer === false) {
+        return
+      }
+      const that = this
+      clearTimeout(this._interval)
+      this._interval = setTimeout(function () {
+        that.countdown(startTime)
+      }, 1000)
+    },
     setTime() {
       const self = this
       let min = 45
       let sec = 0
       this._interval = setInterval(function () {
-        // console.log("sec===",sec)
         if (sec === 0) {
           if (min === 0) {
             self.save("submit")
@@ -257,7 +324,6 @@ export default {
   },
   mounted() {
     this.login()
-    this.detail()
   },
   beforeDestroy() {
     clearInterval(this._interval)
@@ -287,28 +353,39 @@ export default {
   text-align: left;
 }
 
-.right-answer /deep/ .el-textarea__inner {
-  color: red;
-
-}
-
 .login {
   height: 500px;
   width: 600px;
-  background: #42b983;
+  background: #08b5fa;
   margin: auto;
   position: absolute;
   left: 0;
   right: 0;
   top: 0;
   bottom: 0;
+  display: block;
 }
 
-.data-input {
-  height: 500px;
+.form {
   width: 600px;
-  display: table-cell;
-  vertical-align: middle;
+  height: 300px;
+  margin: auto;
+  position: absolute;
+  top: 0;
+  bottom: 0;
+}
+
+.form-label {
+  margin: 50px 0;
+  width: 480px;
+}
+
+.form-label /deep/ .el-form-item__label {
+  margin-left: 80px;
+}
+
+.form-button {
+  margin-left: -80px;
 }
 
 </style>
